@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>실시간 동시통역</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+<script src="https://aka.ms/csspeech/jsbrowserpackageraw" defer></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #08090c;
+  --panel:    #0f1117;
+  --panel2:   #161821;
+  --border:   rgba(255,255,255,0.06);
+  --border2:  rgba(255,255,255,0.12);
+  --text:     #e2e4ec;
+  --text2:    #6b7080;
+  --text3:    #373b4a;
+  --cyan:     #00e5c8;
+  --cyan-dim: rgba(0,229,200,0.12);
+  --cyan-glow:rgba(0,229,200,0.25);
+  --amber:    #ffb340;
+  --amber-dim:rgba(255,179,64,0.12);
+  --red:      #ff4d6a;
+  --red-dim:  rgba(255,77,106,0.12);
+  --green:    #4dffb4;
+  --green-dim:rgba(77,255,180,0.1);
+  --r: 8px;
+  --r-lg: 14px;
+}
+
+body {
+  font-family: 'Noto Sans KR', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 2rem 1rem 4rem;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* ── Scanline overlay ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.04) 2px, rgba(0,0,0,0.04) 4px);
+  pointer-events: none; z-index: 0;
+}
+
+.container { max-width: 780px; margin: 0 auto; position: relative; z-index: 1; }
+
+/* ── Header ── */
+.header { margin-bottom: 2.5rem; display: flex; align-items: flex-start; gap: 18px; }
+.logo-wrap {
+  flex-shrink: 0;
+  width: 52px; height: 52px;
+  border: 1px solid var(--cyan);
+  border-radius: var(--r);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 20px var(--cyan-glow), inset 0 0 20px rgba(0,229,200,0.05);
+  position: relative; overflow: hidden;
+}
+.logo-wrap::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, var(--cyan-dim) 0%, transparent 60%);
+}
+.logo-wrap svg { width: 26px; height: 26px; fill: var(--cyan); position: relative; z-index:1; }
+
+.header-text { flex: 1; }
+.header h1 {
+  font-family: 'Space Mono', monospace;
+  font-size: 20px; font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.header h1 span { color: var(--cyan); }
+.header-sub {
+  font-size: 12px; color: var(--text2);
+  margin-top: 4px; display: flex; align-items: center; gap: 8px;
+}
+.badge {
+  font-family: 'Space Mono', monospace;
+  font-size: 10px; padding: 2px 7px;
+  border: 1px solid var(--cyan);
+  border-radius: 100px; color: var(--cyan);
+  letter-spacing: 0.05em;
+}
+
+/* ── Card ── */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 1.4rem;
+  margin-bottom: 1rem;
+}
+.card-title {
+  font-family: 'Space Mono', monospace;
+  font-size: 10px; color: var(--text3);
+  letter-spacing: 0.12em; text-transform: uppercase;
+  margin-bottom: 1.1rem;
+  display: flex; align-items: center; gap: 10px;
+}
+.card-title::after { content:''; flex:1; height:1px; background: var(--border); }
+
+/* ── Fields ── */
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.field:last-child { margin-bottom: 0; }
+.field label { font-size: 11px; color: var(--text2); font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.field input, .field select {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text); font-size: 13px;
+  padding: 9px 12px;
+  outline: none; font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%;
+}
+.field input[type="password"] { font-family: 'Space Mono', monospace; letter-spacing: 0.06em; }
+.field input:focus, .field select:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px var(--cyan-dim);
+}
+.field input::placeholder { color: var(--text3); }
+.field select option { background: var(--panel2); }
+
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.row3 { display: grid; grid-template-columns: 1fr 1fr 120px; gap: 10px; }
+
+/* ── API key row ── */
+.key-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-bottom: 12px; }
+.key-row:last-child { margin-bottom: 0; }
+.save-btn {
+  height: 38px; padding: 0 14px;
+  border: 1px solid var(--border2);
+  border-radius: var(--r);
+  background: var(--panel2); color: var(--text2);
+  font-size: 12px; font-family: 'Space Mono', monospace;
+  cursor: pointer; white-space: nowrap;
+  transition: all 0.15s;
+}
+.save-btn:hover { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+.save-btn.saved { border-color: rgba(77,255,180,0.3); color: var(--green); background: var(--green-dim); }
+
+/* ── Translator tabs ── */
+.tabs { display: flex; background: var(--panel2); border-radius: var(--r); padding: 3px; gap: 3px; }
+.tab {
+  flex:1; padding: 8px 0; border:none; background: transparent;
+  color: var(--text2); font-size: 12px; font-family: 'Space Mono', monospace;
+  cursor: pointer; border-radius: 6px; transition: all 0.15s;
+}
+.tab.active { background: var(--cyan); color: #000; font-weight: 700; }
+
+/* ── Main action ── */
+.main-btn {
+  width: 100%; padding: 17px;
+  border: none; border-radius: var(--r-lg);
+  font-size: 15px; font-weight: 700; font-family: 'Space Mono', monospace;
+  cursor: pointer; transition: all 0.2s;
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px; letter-spacing: 0.02em; margin-bottom: 1rem;
+  position: relative; overflow: hidden;
+}
+.main-btn.start {
+  background: var(--cyan); color: #000;
+  box-shadow: 0 0 30px var(--cyan-glow);
+}
+.main-btn.start:hover { transform: translateY(-2px); box-shadow: 0 0 50px var(--cyan-glow); }
+.main-btn.stop {
+  background: var(--red-dim); color: var(--red);
+  border: 1px solid rgba(255,77,106,0.3);
+  box-shadow: 0 0 20px rgba(255,77,106,0.1);
+}
+.main-btn.stop:hover { background: rgba(255,77,106,0.2); }
+.main-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+
+/* Pulse ring on start */
+.main-btn.stop::before {
+  content: '';
+  position: absolute; inset: -2px;
+  border-radius: inherit;
+  border: 2px solid var(--red);
+  animation: ring-pulse 1.8s ease-in-out infinite;
+  opacity: 0;
+}
+@keyframes ring-pulse {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.03); opacity: 0; }
+}
+
+/* ── Status bar ── */
+.status-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 16px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r); margin-bottom: 1rem;
+  font-size: 13px; color: var(--text2);
+  font-family: 'Space Mono', monospace;
+}
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text3); flex-shrink: 0; transition: all 0.3s;
+}
+.status-dot.listening { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); animation: blink 1.4s infinite; }
+.status-dot.translating { background: var(--amber); box-shadow: 0 0 10px var(--amber); animation: blink 0.5s infinite; }
+.status-dot.speaking { background: var(--green); box-shadow: 0 0 10px var(--green); animation: blink 1s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.25} }
+
+/* ── Live output ── */
+.live-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1rem; }
+.live-panel {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 1.1rem;
+  min-height: 140px; display: flex; flex-direction: column;
+  position: relative; overflow: hidden;
+}
+.live-panel.src-panel { border-color: rgba(0,229,200,0.18); }
+.live-panel.tgt-panel { border-color: rgba(255,179,64,0.18); }
+
+.live-panel-glow {
+  position: absolute; top: -20px; right: -20px;
+  width: 80px; height: 80px; border-radius: 50%;
+  opacity: 0.25; pointer-events: none;
+}
+.src-panel .live-panel-glow { background: radial-gradient(circle, var(--cyan), transparent 70%); }
+.tgt-panel .live-panel-glow { background: radial-gradient(circle, var(--amber), transparent 70%); }
+
+.panel-label {
+  font-family: 'Space Mono', monospace;
+  font-size: 10px; color: var(--text3);
+  letter-spacing: 0.1em; text-transform: uppercase;
+  margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
+}
+.dot-xs { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.dot-xs.src { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+.dot-xs.tgt { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+
+.live-interim {
+  font-size: 13px; color: var(--text3); font-style: italic;
+  line-height: 1.7; flex: 1;
+  transition: color 0.2s;
+}
+.live-final {
+  font-size: 15px; color: var(--text);
+  line-height: 1.7; flex: 1;
+}
+.live-placeholder {
+  font-size: 13px; color: var(--text3); font-style: italic;
+}
+
+/* ── History ── */
+.history-panel {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 1.4rem;
+}
+.history-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.history-title {
+  font-family: 'Space Mono', monospace;
+  font-size: 10px; color: var(--text3);
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+.clear-btn {
+  font-size: 11px; background: none; border: none;
+  color: var(--text3); cursor: pointer; font-family: 'Space Mono', monospace;
+  padding: 3px 8px; border-radius: 6px; transition: all 0.15s;
+}
+.clear-btn:hover { background: var(--panel2); color: var(--text2); }
+
+.history-list { max-height: 260px; overflow-y: auto; }
+.history-list::-webkit-scrollbar { width: 3px; }
+.history-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+.history-item {
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+  animation: slideIn 0.3s ease;
+}
+.history-item:last-child { border-bottom: none; }
+@keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+
+.history-ts {
+  font-family: 'Space Mono', monospace;
+  font-size: 10px; color: var(--text3); margin-bottom: 5px;
+}
+.history-src { font-size: 13px; color: var(--text2); margin-bottom: 3px; }
+.history-tgt { font-size: 14px; color: var(--text); font-weight: 500; }
+.history-empty { font-size: 13px; color: var(--text3); font-style: italic; text-align: center; padding: 2rem 0; }
+
+/* ── Queue indicator ── */
+.queue-badge {
+  display: none; align-items: center; gap: 6px;
+  font-family: 'Space Mono', monospace;
+  font-size: 11px; color: var(--amber);
+  background: var(--amber-dim);
+  border: 1px solid rgba(255,179,64,0.25);
+  border-radius: 100px; padding: 3px 10px;
+  margin-left: auto;
+}
+.queue-badge.visible { display: flex; }
+
+/* ── Toast ── */
+.toast {
+  position: fixed; bottom: 1.5rem; right: 1.5rem;
+  background: var(--panel); border: 1px solid var(--border2);
+  font-size: 13px; font-family: 'Space Mono', monospace;
+  padding: 11px 18px; border-radius: var(--r);
+  opacity: 0; transform: translateY(10px);
+  transition: all 0.22s; pointer-events: none;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6); z-index: 9999;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+
+@media (max-width: 560px) {
+  .live-grid, .row2, .row3 { grid-template-columns: 1fr; }
+  .row3 { grid-template-columns: 1fr 1fr; }
+  .key-row { grid-template-columns: 1fr; }
+  .save-btn { width: 100%; }
+}
+</style>
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="실시간 동시통역">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#7c3aed">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <script>
+    if('serviceWorker' in navigator){
+      window.addEventListener('load',()=>{
+        navigator.serviceWorker.register('./service-worker.js');
+      });
+    }
+    window.addEventListener('beforeinstallprompt',e=>{
+      e.preventDefault();
+      window._pwaE=e;
+      var b=document.createElement('div');
+      b.style='position:fixed;bottom:0;left:0;right:0;background:#7c3aed;color:#fff;padding:18px;text-align:center;z-index:9999;font-size:15px;font-weight:bold;cursor:pointer;font-family:sans-serif;';
+      b.innerHTML='📲 홈화면에 앱 추가하기 · Add to Home Screen';
+      b.onclick=async function(){window._pwaE.prompt();var r=await window._pwaE.userChoice;if(r.outcome==='accepted')b.remove();};
+      document.body.appendChild(b);
+    });
+  </script>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-wrap">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+    </div>
+    <div class="header-text">
+      <h1>LIVE <span>INTERPRETER</span></h1>
+      <div class="header-sub">
+        실시간 동시통역 · Azure Speech SDK 스트리밍
+        <span class="badge">LIVE</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- API Keys -->
+  <div class="card">
+    <div class="card-title">API 키 설정</div>
+
+    <!-- Azure Speech -->
+    <div class="key-row">
+      <div class="field">
+        <label>Azure Speech Key + Region</label>
+        <div style="display:grid;grid-template-columns:1fr 140px;gap:8px;">
+          <input type="password" id="azureKey" placeholder="Azure Speech Key" autocomplete="off" oninput="markUnsaved('azure')">
+          <input type="text" id="azureRegion" placeholder="koreacentral" autocomplete="off" oninput="markUnsaved('azure')">
+        </div>
+      </div>
+      <button class="save-btn" id="saveBtn-azure" onclick="saveKey('azure')">SAVE</button>
+    </div>
+
+    <!-- Translator -->
+    <div class="field" style="margin-top:4px;">
+      <label>번역 엔진</label>
+      <div class="tabs">
+        <button class="tab active" id="tab-groq" onclick="selectTranslator('groq')">⚡ Groq</button>
+        <button class="tab" id="tab-gemini" onclick="selectTranslator('gemini')">✦ Gemini</button>
+        <button class="tab" id="tab-azure" onclick="selectTranslator('azure')">☁ Azure</button>
+      </div>
+    </div>
+
+    <!-- Groq key -->
+    <div id="groq-key-row" class="key-row" style="margin-top:10px;">
+      <div class="field">
+        <label>Groq API Key</label>
+        <input type="password" id="groqKey" placeholder="gsk_..." autocomplete="off" oninput="markUnsaved('groq')">
+      </div>
+      <button class="save-btn" id="saveBtn-groq" onclick="saveKey('groq')">SAVE</button>
+    </div>
+
+    <!-- Gemini key -->
+    <div id="gemini-key-row" class="key-row" style="margin-top:10px;display:none;">
+      <div class="field">
+        <label>Gemini API Key</label>
+        <input type="password" id="geminiKey" placeholder="AIza..." autocomplete="off" oninput="markUnsaved('gemini')">
+      </div>
+      <button class="save-btn" id="saveBtn-gemini" onclick="saveKey('gemini')">SAVE</button>
+    </div>
+
+    <!-- Azure Translator key (same key can be used if Cognitive Services) -->
+    <div id="azure-trans-key-row" class="key-row" style="margin-top:10px;display:none;">
+      <div class="field">
+        <label>Azure Translator Key</label>
+        <input type="password" id="azureTransKey" placeholder="Azure Translator Key" autocomplete="off" oninput="markUnsaved('azureTrans')">
+      </div>
+      <button class="save-btn" id="saveBtn-azureTrans" onclick="saveKey('azureTrans')">SAVE</button>
+    </div>
+  </div>
+
+  <!-- Language & Voice -->
+  <div class="card">
+    <div class="card-title">언어 & 음성 설정</div>
+    <div class="row2" style="margin-bottom:12px;">
+      <div class="field">
+        <label>입력 언어</label>
+        <select id="srcLang" onchange="savePref()">
+          <option value="ko-KR">🇰🇷 한국어</option>
+          <option value="en-US">🇺🇸 영어</option>
+          <option value="ja-JP">🇯🇵 일본어</option>
+          <option value="zh-CN">🇨🇳 중국어</option>
+          <option value="es-ES">🇪🇸 스페인어</option>
+          <option value="fr-FR">🇫🇷 프랑스어</option>
+          <option value="de-DE">🇩🇪 독일어</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>번역 대상 언어</label>
+        <select id="tgtLang" onchange="onTgtLangChange()">
+          <option value="en">🇺🇸 영어</option>
+          <option value="ja">🇯🇵 일본어</option>
+          <option value="zh-Hans">🇨🇳 중국어 (간체)</option>
+          <option value="es">🇪🇸 스페인어</option>
+          <option value="fr">🇫🇷 프랑스어</option>
+          <option value="de">🇩🇪 독일어</option>
+          <option value="ko">🇰🇷 한국어</option>
+          <option value="ar">🇸🇦 아랍어</option>
+          <option value="pt">🇧🇷 포르투갈어</option>
+          <option value="ru">🇷🇺 러시아어</option>
+          <option value="vi">🇻🇳 베트남어</option>
+          <option value="th">🇹🇭 태국어</option>
+          <option value="it">🇮🇹 이탈리아어</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>TTS 음성 (Azure)</label>
+      <select id="azureVoice" onchange="savePref()">
+        <option value="en-US-JennyNeural">영어 — Jenny (여성)</option>
+        <option value="en-US-GuyNeural">영어 — Guy (남성)</option>
+        <option value="en-US-AriaNeural">영어 — Aria (여성)</option>
+        <option value="ja-JP-NanamiNeural">일본어 — Nanami (여성)</option>
+        <option value="ja-JP-KeitaNeural">일본어 — Keita (남성)</option>
+        <option value="zh-CN-XiaoxiaoNeural">중국어 — Xiaoxiao (여성)</option>
+        <option value="zh-CN-YunxiNeural">중국어 — Yunxi (남성)</option>
+        <option value="es-ES-ElviraNeural">스페인어 — Elvira (여성)</option>
+        <option value="fr-FR-DeniseNeural">프랑스어 — Denise (여성)</option>
+        <option value="de-DE-KatjaNeural">독일어 — Katja (여성)</option>
+        <option value="ko-KR-SunHiNeural">한국어 — SunHi (여성)</option>
+        <option value="ko-KR-InJoonNeural">한국어 — InJoon (남성)</option>
+        <option value="ar-SA-ZariyahNeural">아랍어 — Zariyah (여성)</option>
+        <option value="pt-BR-FranciscaNeural">포르투갈어 — Francisca (여성)</option>
+        <option value="ru-RU-SvetlanaNeural">러시아어 — Svetlana (여성)</option>
+        <option value="vi-VN-HoaiMyNeural">베트남어 — HoaiMy (여성)</option>
+        <option value="th-TH-PremwadeeNeural">태국어 — Premwadee (여성)</option>
+        <option value="it-IT-ElsaNeural">이탈리아어 — Elsa (여성)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Main button -->
+  <button class="main-btn start" id="mainBtn" onclick="toggleInterpreter()">
+    ▶ 통역 시작
+  </button>
+
+  <!-- Status -->
+  <div class="status-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">API 키를 저장하고 통역 시작을 누르세요</span>
+    <div class="queue-badge" id="queueBadge">
+      <span id="queueCount">0</span>건 대기
+    </div>
+  </div>
+
+  <!-- Live output -->
+  <div class="live-grid">
+    <div class="live-panel src-panel">
+      <div class="live-panel-glow"></div>
+      <div class="panel-label"><div class="dot-xs src"></div> 인식 중</div>
+      <div id="srcDisplay" class="live-placeholder">말하면 실시간으로 인식됩니다</div>
+    </div>
+    <div class="live-panel tgt-panel">
+      <div class="live-panel-glow"></div>
+      <div class="panel-label"><div class="dot-xs tgt"></div> 번역 결과</div>
+      <div id="tgtDisplay" class="live-placeholder">번역된 내용이 여기에 표시됩니다</div>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div class="history-panel">
+    <div class="history-header">
+      <div class="history-title">통역 기록</div>
+      <button class="clear-btn" onclick="clearHistory()">기록 지우기</button>
+    </div>
+    <div class="history-list" id="historyList">
+      <div class="history-empty">아직 통역 기록이 없습니다</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─────────────────────────────────────────────
+//  Storage keys
+// ─────────────────────────────────────────────
+const SK = {
+  azureKey:     'li_azure_key',
+  azureRegion:  'li_azure_region',
+  groqKey:      'li_groq_key',
+  geminiKey:    'li_gemini_key',
+  azureTransKey:'li_azure_trans_key',
+  translator:   'li_translator',
+  srcLang:      'li_src_lang',
+  tgtLang:      'li_tgt_lang',
+  azureVoice:   'li_azure_voice',
+};
+
+// ─────────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────────
+let isRunning = false;
+let recognizer = null;
+let translator = 'groq';
+let historyItems = [];
+let ttsQueue = [];
+let ttsPlaying = false;
+let pendingFinal = ''; // accumulate finals until pause
+
+// ─────────────────────────────────────────────
+//  Init
+// ─────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  const load = (id, key) => {
+    const v = localStorage.getItem(key);
+    if (v) document.getElementById(id).value = v;
+  };
+  load('azureKey',     SK.azureKey);
+  load('azureRegion',  SK.azureRegion);
+  load('groqKey',      SK.groqKey);
+  load('geminiKey',    SK.geminiKey);
+  load('azureTransKey',SK.azureTransKey);
+  load('srcLang',      SK.srcLang);
+  load('tgtLang',      SK.tgtLang);
+  load('azureVoice',   SK.azureVoice);
+
+  if (localStorage.getItem(SK.azureKey))     setSaved('azure', true);
+  if (localStorage.getItem(SK.groqKey))      setSaved('groq', true);
+  if (localStorage.getItem(SK.geminiKey))    setSaved('gemini', true);
+  if (localStorage.getItem(SK.azureTransKey))setSaved('azureTrans', true);
+
+  const savedTrans = localStorage.getItem(SK.translator) || 'groq';
+  selectTranslator(savedTrans, false);
+});
+
+// ─────────────────────────────────────────────
+//  Key management
+// ─────────────────────────────────────────────
+function saveKey(name) {
+  const map = {
+    azure:     ['azureKey', SK.azureKey],
+    groq:      ['groqKey',  SK.groqKey],
+    gemini:    ['geminiKey',SK.geminiKey],
+    azureTrans:['azureTransKey', SK.azureTransKey],
+  };
+  const [id, storageKey] = map[name];
+  const val = document.getElementById(id).value.trim();
+  if (name === 'azure') {
+    const region = document.getElementById('azureRegion').value.trim();
+    if (!val) { showToast('❌ Azure 키를 입력해주세요', true); return; }
+    localStorage.setItem(storageKey, val);
+    if (region) localStorage.setItem(SK.azureRegion, region);
+    setSaved('azure', true);
+    showToast('✓ Azure 키 저장됨');
+    return;
+  }
+  if (!val) { showToast('❌ 키를 입력해주세요', true); return; }
+  localStorage.setItem(storageKey, val);
+  setSaved(name, true);
+  showToast('✓ 키 저장됨');
+}
+
+function markUnsaved(name) { setSaved(name, false); }
+
+function setSaved(name, saved) {
+  const btn = document.getElementById('saveBtn-' + name);
+  if (!btn) return;
+  if (saved) { btn.classList.add('saved'); btn.textContent = '✓ OK'; }
+  else { btn.classList.remove('saved'); btn.textContent = 'SAVE'; }
+}
+
+// ─────────────────────────────────────────────
+//  Translator toggle
+// ─────────────────────────────────────────────
+function selectTranslator(name, save = true) {
+  translator = name;
+  ['groq','gemini','azure'].forEach(t => {
+    document.getElementById('tab-' + t).classList.toggle('active', t === name);
+  });
+  document.getElementById('groq-key-row').style.display       = name === 'groq'   ? 'grid' : 'none';
+  document.getElementById('gemini-key-row').style.display     = name === 'gemini' ? 'grid' : 'none';
+  document.getElementById('azure-trans-key-row').style.display= name === 'azure'  ? 'grid' : 'none';
+  if (save) localStorage.setItem(SK.translator, name);
+}
+
+// ─────────────────────────────────────────────
+//  Preferences
+// ─────────────────────────────────────────────
+const VOICE_MAP = {
+  'en':'en-US-JennyNeural','ja':'ja-JP-NanamiNeural',
+  'zh-Hans':'zh-CN-XiaoxiaoNeural','es':'es-ES-ElviraNeural',
+  'fr':'fr-FR-DeniseNeural','de':'de-DE-KatjaNeural',
+  'ko':'ko-KR-SunHiNeural','ar':'ar-SA-ZariyahNeural',
+  'pt':'pt-BR-FranciscaNeural','ru':'ru-RU-SvetlanaNeural',
+  'vi':'vi-VN-HoaiMyNeural','th':'th-TH-PremwadeeNeural',
+  'it':'it-IT-ElsaNeural',
+};
+function onTgtLangChange() {
+  const lang = document.getElementById('tgtLang').value;
+  if (VOICE_MAP[lang]) document.getElementById('azureVoice').value = VOICE_MAP[lang];
+  savePref();
+}
+function savePref() {
+  localStorage.setItem(SK.srcLang,    document.getElementById('srcLang').value);
+  localStorage.setItem(SK.tgtLang,    document.getElementById('tgtLang').value);
+  localStorage.setItem(SK.azureVoice, document.getElementById('azureVoice').value);
+}
+
+// ─────────────────────────────────────────────
+//  Main toggle
+// ─────────────────────────────────────────────
+async function toggleInterpreter() {
+  if (!isRunning) await startInterpreter();
+  else stopInterpreter();
+}
+
+async function startInterpreter() {
+  const azureKey    = localStorage.getItem(SK.azureKey) || '';
+  const azureRegion = localStorage.getItem(SK.azureRegion) || 'koreacentral';
+  if (!azureKey) { showToast('❌ Azure Speech 키를 먼저 저장해주세요', true); return; }
+
+  // Check translator key
+  if (translator === 'groq'   && !localStorage.getItem(SK.groqKey))      { showToast('❌ Groq 키를 먼저 저장해주세요', true); return; }
+  if (translator === 'gemini' && !localStorage.getItem(SK.geminiKey))    { showToast('❌ Gemini 키를 먼저 저장해주세요', true); return; }
+  if (translator === 'azure'  && !localStorage.getItem(SK.azureTransKey)){ showToast('❌ Azure Translator 키를 먼저 저장해주세요', true); return; }
+
+  // Check SDK loaded
+  if (typeof SpeechSDK === 'undefined') {
+    showToast('❌ Azure Speech SDK 로딩 중입니다. 잠시 후 다시 시도해주세요', true);
+    return;
+  }
+
+  const srcLang = document.getElementById('srcLang').value;
+
+  try {
+    const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(azureKey, azureRegion);
+    speechConfig.speechRecognitionLanguage = srcLang;
+    speechConfig.setProperty(SpeechSDK.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, '500');
+    speechConfig.setProperty(SpeechSDK.PropertyId.Speech_SegmentationSilenceTimeoutMs, '500');
+
+    const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+    recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+
+    // Interim (recognizing)
+    recognizer.recognizing = (s, e) => {
+      if (e.result.reason === SpeechSDK.ResultReason.RecognizingSpeech) {
+        showSrc(e.result.text, true);
+      }
+    };
+
+    // Final (recognized)
+    recognizer.recognized = async (s, e) => {
+      if (e.result.reason === SpeechSDK.ResultReason.RecognizedSpeech) {
+        const text = e.result.text.trim();
+        if (!text) return;
+        showSrc(text, false);
+        // Translate & speak
+        setStatus('translating', '번역 중...');
+        try {
+          const translated = await translateText(text);
+          showTgt(translated);
+          addHistory(text, translated);
+          enqueueTTS(translated);
+        } catch(err) {
+          setStatus('listening', '⚠️ 번역 오류: ' + err.message.slice(0,40));
+        }
+      }
+    };
+
+    recognizer.canceled = (s, e) => {
+      if (e.reason === SpeechSDK.CancellationReason.Error) {
+        showToast('❌ Azure 오류: ' + e.errorDetails?.slice(0,60), true);
+        stopInterpreter();
+      }
+    };
+
+    recognizer.sessionStopped = () => { if (isRunning) stopInterpreter(); };
+
+    await recognizer.startContinuousRecognitionAsync();
+    isRunning = true;
+
+    const btn = document.getElementById('mainBtn');
+    btn.className = 'main-btn stop';
+    btn.textContent = '■ 통역 중지';
+    setStatus('listening', '🎤 듣는 중... (실시간 인식)');
+
+  } catch(e) {
+    showToast('❌ 시작 실패: ' + e.message?.slice(0,60), true);
+  }
+}
+
+function stopInterpreter() {
+  isRunning = false;
+  if (recognizer) {
+    recognizer.stopContinuousRecognitionAsync(() => { recognizer.close(); recognizer = null; });
+  }
+  ttsQueue = []; ttsPlaying = false;
+  const btn = document.getElementById('mainBtn');
+  btn.className = 'main-btn start';
+  btn.textContent = '▶ 통역 시작';
+  setStatus('', '중지됨');
+  updateQueueBadge();
+}
+
+// ─────────────────────────────────────────────
+//  Translation
+// ─────────────────────────────────────────────
+async function translateText(text) {
+  const tgtLangEl = document.getElementById('tgtLang');
+  const langCode = tgtLangEl.value;
+  const langName = tgtLangEl.selectedOptions[0].text.replace(/[\u{1F1E0}-\u{1F1FF}]/gu,'').trim();
+
+  if (translator === 'groq') {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem(SK.groqKey), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: `You are a professional simultaneous interpreter. Translate the following to ${langName}. Output ONLY the translation, nothing else.` },
+          { role: 'user', content: text }
+        ],
+        max_tokens: 500, temperature: 0.2
+      })
+    });
+    if (!res.ok) throw new Error('Groq ' + res.status + ': ' + (await res.text()).slice(0,50));
+    const d = await res.json();
+    return d.choices[0].message.content.trim();
+
+  } else if (translator === 'gemini') {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${localStorage.getItem(SK.geminiKey)}`,
+      {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{
+          text: `You are a simultaneous interpreter. Translate to ${langName}. Output ONLY the translation:\n\n${text}`
+        }]}]})
+      }
+    );
+    if (!res.ok) throw new Error('Gemini ' + res.status);
+    const d = await res.json();
+    return (d.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+
+  } else {
+    // Azure Translator
+    const res = await fetch(
+      `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=${langCode}`,
+      {
+        method: 'POST',
+        headers: {
+          'Ocp-Apim-Subscription-Key': localStorage.getItem(SK.azureTransKey),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify([{ text }])
+      }
+    );
+    if (!res.ok) throw new Error('Azure Translator ' + res.status);
+    const d = await res.json();
+    return d[0]?.translations?.[0]?.text || '';
+  }
+}
+
+// ─────────────────────────────────────────────
+//  TTS Queue (순서 보장)
+// ─────────────────────────────────────────────
+function enqueueTTS(text) {
+  ttsQueue.push(text);
+  updateQueueBadge();
+  if (!ttsPlaying) drainTTS();
+}
+
+async function drainTTS() {
+  if (!ttsQueue.length) { ttsPlaying = false; updateQueueBadge(); return; }
+  ttsPlaying = true;
+  const text = ttsQueue.shift();
+  updateQueueBadge();
+  setStatus('speaking', '🔊 번역 음성 출력 중...');
+  try { await azureTTS(text); } catch(e) { console.warn('TTS error:', e); }
+  if (isRunning) setStatus('listening', '🎤 듣는 중... (실시간 인식)');
+  drainTTS();
+}
+
+function updateQueueBadge() {
+  const badge = document.getElementById('queueBadge');
+  const count = ttsQueue.length;
+  document.getElementById('queueCount').textContent = count;
+  badge.classList.toggle('visible', count > 0);
+}
+
+// ─────────────────────────────────────────────
+//  Azure TTS
+// ─────────────────────────────────────────────
+async function azureTTS(text) {
+  const region = localStorage.getItem(SK.azureRegion) || 'koreacentral';
+  const voice  = document.getElementById('azureVoice').value;
+  const lang   = voice.split('-').slice(0,2).join('-');
+  const safe   = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const ssml   = `<speak version='1.0' xml:lang='${lang}'><voice name='${voice}'>${safe}</voice></speak>`;
+
+  const res = await fetch(`https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`, {
+    method: 'POST',
+    headers: {
+      'Ocp-Apim-Subscription-Key': localStorage.getItem(SK.azureKey),
+      'Content-Type': 'application/ssml+xml',
+      'X-Microsoft-OutputFormat': 'audio-24khz-96kbitrate-mono-mp3'
+    },
+    body: ssml
+  });
+  if (!res.ok) throw new Error('Azure TTS ' + res.status);
+  const audio = new Audio(URL.createObjectURL(await res.blob()));
+  audio.play();
+  return new Promise(r => { audio.onended = r; audio.onerror = r; });
+}
+
+// ─────────────────────────────────────────────
+//  UI helpers
+// ─────────────────────────────────────────────
+function showSrc(text, interim) {
+  const el = document.getElementById('srcDisplay');
+  el.className = interim ? 'live-interim' : 'live-final';
+  el.textContent = text;
+}
+
+function showTgt(text) {
+  const el = document.getElementById('tgtDisplay');
+  el.className = 'live-final';
+  el.textContent = text;
+}
+
+function setStatus(state, text) {
+  document.getElementById('statusDot').className = 'status-dot' + (state ? ' ' + state : '');
+  document.getElementById('statusText').textContent = text;
+}
+
+let toastTimer;
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.borderColor = isError ? 'rgba(255,77,106,0.4)' : 'rgba(0,229,200,0.3)';
+  t.style.color = isError ? 'var(--red)' : 'var(--cyan)';
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ─────────────────────────────────────────────
+//  History
+// ─────────────────────────────────────────────
+function addHistory(src, tgt) {
+  const ts = new Date().toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  historyItems.unshift({ src, tgt, ts });
+  if (historyItems.length > 50) historyItems.pop();
+  renderHistory();
+}
+function renderHistory() {
+  const list = document.getElementById('historyList');
+  if (!historyItems.length) {
+    list.innerHTML = '<div class="history-empty">아직 통역 기록이 없습니다</div>';
+    return;
+  }
+  list.innerHTML = historyItems.map(h => `
+    <div class="history-item">
+      <div class="history-ts">${h.ts}</div>
+      <div class="history-src">${esc(h.src)}</div>
+      <div class="history-tgt">${esc(h.tgt)}</div>
+    </div>`).join('');
+}
+function clearHistory() { historyItems = []; renderHistory(); }
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+</body>
+</html>
